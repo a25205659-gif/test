@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>酸鹼性檢測小遊戲</title>
+    <!-- 引入 Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 引入 Firebase CDN (用於資料庫和身份驗證) -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+    
+    <style>
+        /* 使用 Inter 字體以保持現代感，並設置背景 */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f4f8; /* 淺藍灰色背景 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+        /* 遊戲卡片樣式 */
+        #game-container {
+            max-width: 480px;
+            width: 100%;
+            background-color: white;
+            padding: 2rem;
+            border-radius: 1.5rem; /* 更圓潤的邊角 */
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        /* 按鈕基礎樣式 */
+        .game-button {
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.75rem;
+            font-size: 1.25rem;
+            font-weight: bold;
+            transition: transform 0.1s, box-shadow 0.1s;
+            cursor: pointer;
+            width: 48%; /* 確保兩個按鈕並排 */
+        }
+        .game-button:active {
+            transform: translateY(2px);
+            box-shadow: none;
+        }
+        /* 自定義按鈕陰影和顏色 */
+        #acid-btn {
+            background-color: #ef4444; /* 紅色，代表酸 */
+            color: white;
+            box-shadow: 0 4px #dc2626;
+        }
+        #base-btn {
+            background-color: #3b82f6; /* 藍色，代表鹼 */
+            color: white;
+            box-shadow: 0 4px #2563eb;
+        }
+
+        /* 反饋訊息動畫 */
+        @keyframes fade-in-up {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        #feedback-message {
+            animation: fade-in-up 0.5s ease-out;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <h1 class="text-3xl font-extrabold text-gray-800 mb-6">
+        🧪 酸鹼性大挑戰
+    </h1>
+
+    <!-- 分數顯示區 -->
+    <div class="flex justify-between items-center bg-yellow-100 p-4 rounded-xl mb-8 border border-yellow-300">
+        <span class="text-xl font-medium text-yellow-800">總金幣：</span>
+        <span id="score" class="text-3xl font-bold text-yellow-600">0</span>
+    </div>
+    
+    <!-- Firebase Status -->
+    <div id="firebase-status" class="text-xs text-center text-gray-500 mb-4">
+        連線中...
+    </div>
+
+    <!-- 1. 姓名輸入區 (Game Setup) -->
+    <div id="name-input-section" class="transition-opacity opacity-0 pointer-events-none p-6 rounded-xl bg-gray-50 mb-8 shadow-inner">
+        <p class="text-xl font-semibold text-indigo-700 mb-4">請輸入您的名稱：</p>
+        <input type="text" id="player-name-input" maxlength="15" placeholder="輸入名稱 (最多15字)" class="w-full p-3 mb-4 border-2 border-indigo-300 rounded-lg text-lg text-center focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <button id="start-game-btn" class="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors">
+            開始 10 題測驗
+        </button>
+        <button id="view-leaderboard-btn" class="w-full mt-2 py-2 bg-gray-400 text-white font-bold rounded-xl hover:bg-gray-500 transition-colors">
+            查看排行榜
+        </button>
+    </div>
+
+    <!-- 2. 遊戲進行區 (Question) -->
+    <div id="quiz-section" class="hidden">
+        <!-- 問題計數器 -->
+        <div id="question-counter" class="text-lg font-semibold text-indigo-600 mb-4">
+            第 0 題 / 共 10 題
+        </div>
+
+        <div class="bg-indigo-50 p-6 rounded-xl mb-8 shadow-inner">
+            <p class="text-lg text-gray-600 mb-3">請判斷以下水溶液的酸鹼性：</p>
+            
+            <!-- Image display area -->
+            <div id="question-display" class="mb-4 flex justify-center">
+                <img id="solution-image" src="" alt="水溶液圖片" class="w-40 h-40 mx-auto rounded-xl shadow-lg border-2 border-indigo-200 object-cover" onerror="this.onerror=null; this.src='https://placehold.co/160x160/CCCCCC/333333?text=Image';" >
+            </div>
+
+            <!-- Text label for the name of the solution -->
+            <div id="solution-name-label" class="text-3xl font-black text-indigo-700 h-10 flex items-center justify-center">
+                載入中...
+            </div>
+        </div>
+
+        <!-- 選項按鈕區 -->
+        <div id="button-area" class="flex justify-between space-x-4 mb-6">
+            <button id="acid-btn" class="game-button" data-type="酸性">
+                <span role="img" aria-label="Acid">🍎</span> 酸性
+            </button>
+            <button id="base-btn" class="game-button" data-type="鹼性">
+                <span role="img" aria-label="Base">🧼</span> 鹼性
+            </button>
+        </div>
+
+        <!-- 反饋訊息區 -->
+        <div id="feedback-container" class="h-10">
+            <!-- 答對或答錯的訊息會顯示在這裡 -->
+        </div>
+        
+        <!-- 下一題 / 完成測驗 按鈕 -->
+        <button id="next-question-btn" class="w-full mt-4 py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition-colors hidden" onclick="loadNextQuestion()">
+            下一題
+        </button>
+
+        <!-- 結束遊戲按鈕 (在固定 10 題模式下，這個按鈕會被隱藏，流程結束自動提交) -->
+        <button id="end-game-btn" class="w-full mt-2 py-3 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 transition-colors hidden">
+            結束並提交分數
+        </button>
+    </div>
+
+
+    <!-- 3. 排行榜區 (Leaderboard) -->
+    <div id="leaderboard-section" class="hidden">
+        <h2 class="text-3xl font-extrabold text-gray-800 mb-6">🏆 排行榜</h2>
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden border border-gray-200">
+            <div class="flex font-bold text-sm text-gray-600 border-b p-3 bg-gray-100">
+                <span class="w-1/6 text-left">#</span>
+                <span class="w-3/6 text-left">名稱</span> <!-- 移除 User ID 顯示 -->
+                <span class="w-2/6 text-right">金幣</span>
+            </div>
+            <ul id="leaderboard-list" class="divide-y divide-gray-100 min-h-[150px]">
+                <!-- 排行榜項目將插入此處 -->
+                <li class="p-4 text-center text-gray-500">載入中...</li>
+            </ul>
+        </div>
+        <button id="back-to-menu-btn" class="w-full mt-4 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-colors">
+            返回主選單
+        </button>
+    </div>
+</div>
+
+<script>
+    // 遊戲數據：水溶液名稱、正確的酸鹼性，以及圖片 URL
+    const solutions = [
+        { name: "檸檬汁", type: "酸性", img: "https://placehold.co/160x160/FFF38F/D97706?text=Lemon+Slice" }, 
+        { name: "肥皂水", type: "鹼性", img: "https://placehold.co/160x160/B3E5FC/01579B?text=Soap+Bubbles" }, 
+        { name: "胃酸", type: "酸性", img: "https://placehold.co/160x160/C62828/FFFFFF?text=Gastric+Fluid" }, 
+        { name: "漂白水", type: "鹼性", img: "https://placehold.co/160x160/FFEB3B/212121?text=Cleaner" }, 
+        { name: "醋", type: "酸性", img: "https://placehold.co/160x160/9C7C3B/FFFFFF?text=Vinegar+Bottle" }, 
+        { name: "小蘇打水", type: "鹼性", img: "https://placehold.co/160x160/F5F5F5/424242?text=Baking+Powder" }, 
+        { name: "咖啡", type: "酸性", img: "https://placehold.co/160x160/4E342E/FFFFFF?text=Coffee+Cup" }, 
+        { name: "氨水", type: "鹼性", img: "https://placehold.co/160x160/64DD17/FFFFFF?text=Ammonia" }, 
+        { name: "番茄汁", type: "酸性", img: "https://placehold.co/160x160/E53935/FFFFFF?text=Tomato" }, 
+        { name: "可樂", type: "酸性", img: "https://placehold.co/160x160/212121/BDBDBD?text=Fizzy+Cola" }, 
+    ];
+
+    // --- 遊戲狀態變量 ---
+    const MAX_QUESTIONS = 10;
+    let currentScore = 0;
+    let questionPool = []; // 亂數排序後的題庫
+    let currentQuestionIndex = 0; // 0-indexed，表示下一題要載入的索引
+    let isAnswered = false;
+
+    // --- DOM Elements ---
+    const scoreDisplay = document.getElementById('score');
+    const solutionImage = document.getElementById('solution-image');
+    const solutionNameLabel = document.getElementById('solution-name-label');
+    const feedbackContainer = document.getElementById('feedback-container');
+    const acidBtn = document.getElementById('acid-btn');
+    const baseBtn = document.getElementById('base-btn');
+    const nextBtn = document.getElementById('next-question-btn');
+    const startGameBtn = document.getElementById('start-game-btn');
+    const viewLeaderboardBtn = document.getElementById('view-leaderboard-btn');
+    const backToMenuBtn = document.getElementById('back-to-menu-btn');
+    const nameInput = document.getElementById('player-name-input');
+    const nameInputSection = document.getElementById('name-input-section');
+    const quizSection = document.getElementById('quiz-section');
+    const leaderboardSection = document.getElementById('leaderboard-section');
+    const leaderboardList = document.getElementById('leaderboard-list');
+    const buttonArea = document.getElementById('button-area');
+    const questionCounter = document.getElementById('question-counter');
+    const buttons = [acidBtn, baseBtn];
+
+    // --- Firebase Global Vars ---
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+    let db, auth;
+    let userId = 'anonymous'; // 內部變量，用於資料庫操作和當前玩家高亮
+
+    // --- Utility Functions ---
+
+    /**
+     * Fisher-Yates 亂數洗牌算法
+     */
+    function shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]];
+        }
+        return array;
+    }
+
+    /**
+     * 顯示反饋訊息，並在幾秒後自動清除。
+     */
+    function showFeedback(message, bgColorClass) {
+        feedbackContainer.innerHTML = `<div id="feedback-message" class="p-2 rounded-xl text-white font-bold ${bgColorClass}">${message}</div>`;
+        const msgElement = document.getElementById('feedback-message');
+        if (msgElement) {
+             msgElement.style.animation = 'none';
+             msgElement.offsetHeight; 
+             msgElement.style.animation = null;
+        }
+
+        setTimeout(() => {
+            if (feedbackContainer.contains(msgElement)) {
+                feedbackContainer.innerHTML = '';
+            }
+        }, 3000);
+    }
+
+    /**
+     * 更新分數顯示。
+     */
+    function updateScoreDisplay() {
+        scoreDisplay.textContent = currentScore;
+    }
+
+    /**
+     * 禁用或啟用選擇按鈕。
+     */
+    function toggleAnswerButtons(disable) {
+        buttons.forEach(btn => {
+            btn.disabled = disable;
+            btn.classList.toggle('opacity-50', disable);
+            btn.classList.toggle('hover:opacity-100', !disable);
+            btn.classList.toggle('cursor-not-allowed', disable);
+        });
+    }
+
+    function showSection(sectionId) {
+        nameInputSection.classList.add('hidden');
+        quizSection.classList.add('hidden');
+        leaderboardSection.classList.add('hidden');
+
+        document.getElementById(sectionId).classList.remove('hidden');
+    }
+
+    // --- Firebase Initialization and Auth ---
+
+    async function initializeFirebase() {
+        if (!firebaseConfig) {
+            console.error("Firebase config is missing.");
+            document.getElementById('firebase-status').textContent = '❌ 資料庫初始化失敗：缺少配置。';
+            return;
+        }
+
+        try {
+            const app = firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            auth = firebase.auth();
+
+            // 設定偵錯等級
+            firebase.firestore.setLogLevel('debug');
+
+            // 處理身份驗證
+            if (initialAuthToken) {
+                await auth.signInWithCustomToken(initialAuthToken);
+            } else {
+                await auth.signInAnonymously();
+            }
+
+            auth.onAuthStateChanged((user) => {
+                if (user) {
+                    userId = user.uid;
+                    // 移除 User ID 顯示，只顯示連線狀態
+                    document.getElementById('firebase-status').textContent = '✅ 資料庫已連線';
+                    loadLeaderboard();
+                } else {
+                    document.getElementById('firebase-status').textContent = '❌ 身份驗證失敗。';
+                }
+                // 身份驗證完成後才顯示輸入區
+                nameInputSection.classList.remove('opacity-0', 'pointer-events-none');
+            });
+
+        } catch (error) {
+            console.error("Firebase initialization or auth failed:", error);
+            document.getElementById('firebase-status').textContent = `❌ 資料庫連線失敗: ${error.message}`;
+        }
+    }
+
+    // --- Firestore Functions ---
+
+    /**
+     * 儲存玩家分數到 Firestore 排行榜。
+     */
+    async function saveScore(playerName, score) {
+        // 只有分數大於 0 才儲存
+        if (!db) {
+             showFeedback('❌ 資料庫未連線，分數無法提交！', 'bg-red-500');
+            return;
+        }
+        
+        // 確保至少答對 1 題才紀錄，避免灌水
+        if (score === 0) {
+            showFeedback('📝 分數為 0，不予記錄至排行榜。', 'bg-gray-500');
+            return;
+        }
+
+        // Collection path MUST be /artifacts/{appId}/public/data/leaderboard
+        const collectionPath = `artifacts/${appId}/public/data/leaderboard`;
+        const scoreData = {
+            name: playerName || '匿名玩家',
+            score: score,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            // 必須保留 userId 以符合 Firestore 安全規則和當前玩家高亮需求
+            userId: userId, 
+        };
+
+        try {
+            await db.collection(collectionPath).add(scoreData);
+            showFeedback('✅ 分數提交成功！', 'bg-green-500');
+        } catch (e) {
+            console.error("Error saving score: ", e);
+            showFeedback('❌ 分數提交失敗！請檢查連線。', 'bg-red-500');
+        }
+    }
+
+    /**
+     * 從 Firestore 載入排行榜並顯示。
+     */
+    async function loadLeaderboard() {
+        if (!db) {
+            leaderboardList.innerHTML = '<li class="p-4 text-center text-red-500">資料庫連線錯誤。</li>';
+            return;
+        }
+        leaderboardList.innerHTML = '<li class="p-4 text-center text-gray-500">載入中...</li>';
+
+        // Collection path MUST be /artifacts/{appId}/public/data/leaderboard
+        const collectionPath = `artifacts/${appId}/public/data/leaderboard`;
+
+        try {
+            // 使用 onSnapshot 監聽即時變化
+            db.collection(collectionPath)
+              .limit(10) 
+              .onSnapshot(snapshot => {
+                let scores = [];
+                snapshot.forEach(doc => {
+                    scores.push(doc.data());
+                });
+
+                // 根據分數在記憶體中排序 (避免 Firestore 索引問題)
+                scores.sort((a, b) => b.score - a.score);
+
+                leaderboardList.innerHTML = ''; // 清除舊清單
+
+                if (scores.length === 0) {
+                    leaderboardList.innerHTML = '<li class="p-4 text-center text-gray-500">目前沒有分數紀錄。</li>';
+                    return;
+                }
+
+                scores.forEach((data, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'flex justify-between items-center p-3 hover:bg-indigo-50 transition-colors';
+                    // 根據 userId 高亮當前用戶的紀錄
+                    if (data.userId === userId) {
+                        li.classList.add('bg-yellow-100', 'font-bold', 'border-l-4', 'border-yellow-500');
+                    }
+                    
+                    li.innerHTML = `
+                        <span class="w-1/6 text-left font-mono text-xl">${index + 1}</span>
+                        <span class="w-3/6 text-left truncate text-gray-800">${data.name}</span>
+                        <span class="w-2/6 text-right text-3xl font-extrabold text-yellow-600">${data.score}</span>
+                    `;
+                    leaderboardList.appendChild(li);
+                });
+            }, error => {
+                console.error("Error fetching leaderboard: ", error);
+                leaderboardList.innerHTML = '<li class="p-4 text-center text-red-500">載入排行榜失敗。</li>';
+            });
+
+        } catch (e) {
+            console.error("Error initiating leaderboard listener: ", e);
+            leaderboardList.innerHTML = '<li class="p-4 text-center text-red-500">初始化排行榜失敗。</li>';
+        }
+    }
+
+    // --- Game Flow Functions ---
+
+    /**
+     * 載入下一道題目，如果題目已滿則結束遊戲。
+     */
+    function loadNextQuestion() {
+        // 檢查是否已完成所有題目
+        if (currentQuestionIndex >= MAX_QUESTIONS) {
+            endGame();
+            return;
+        }
+        
+        // 重設狀態
+        isAnswered = false;
+        feedbackContainer.innerHTML = '';
+        
+        toggleAnswerButtons(false); // 啟用作答按鈕
+        nextBtn.classList.add('hidden'); // 隱藏下一題按鈕
+        buttonArea.classList.remove('hidden'); 
+
+        // 載入當前索引的題目
+        currentQuestion = questionPool[currentQuestionIndex];
+
+        // 更新 UI
+        // 題數顯示是 1-indexed
+        questionCounter.textContent = `第 ${currentQuestionIndex + 1} 題 / 共 ${MAX_QUESTIONS} 題`; 
+        solutionNameLabel.textContent = currentQuestion.name; 
+        solutionImage.src = currentQuestion.img; 
+        solutionImage.alt = `圖片：${currentQuestion.name}`;
+        
+        // 準備下一題的索引
+        currentQuestionIndex++;
+        
+        // 如果下一題就是最後一題，更新按鈕文字
+        if (currentQuestionIndex === MAX_QUESTIONS) {
+            nextBtn.textContent = '完成測驗並提交分數';
+            nextBtn.classList.remove('bg-green-500');
+            nextBtn.classList.add('bg-red-500');
+        } else {
+             nextBtn.textContent = '下一題';
+             nextBtn.classList.add('bg-green-500');
+             nextBtn.classList.remove('bg-red-500');
+        }
+    }
+
+    /**
+     * 處理玩家的答案選擇。
+     */
+    function handleAnswer(event) {
+        if (isAnswered) return; 
+
+        isAnswered = true;
+        toggleAnswerButtons(true); // 禁用按鈕
+        nextBtn.classList.remove('hidden'); // 顯示下一題/完成按鈕
+
+        const selectedType = event.currentTarget.getAttribute('data-type');
+        const correctAnswer = currentQuestion.type;
+        const isCorrect = (selectedType === correctAnswer);
+
+        if (isCorrect) {
+            currentScore += 100; // 答對加分
+            updateScoreDisplay();
+            showFeedback(`✅ 答對了！恭喜獲得 +100 金幣！`, 'bg-green-500');
+            event.currentTarget.classList.add('ring-4', 'ring-green-400');
+        } else {
+            // 答錯不扣分
+            showFeedback(`❌ 答錯了！正確答案是 ${correctAnswer}。`, 'bg-red-500');
+            event.currentTarget.classList.add('ring-4', 'ring-red-400');
+            const correctBtn = document.querySelector(`[data-type="${correctAnswer}"]`);
+            if (correctBtn) {
+                correctBtn.classList.add('ring-4', 'ring-green-400');
+            }
+        }
+        
+        setTimeout(() => {
+            buttons.forEach(btn => btn.classList.remove('ring-4', 'ring-green-400', 'ring-red-400'));
+        }, 2000);
+    }
+    
+    /**
+     * 啟動遊戲。
+     */
+    function startGame() {
+        const playerName = nameInput.value.trim() || '匿名玩家';
+        if (playerName.length > 15) {
+             showFeedback('❌ 名稱太長，請小於15個字。', 'bg-red-500');
+             return;
+        }
+        if (solutions.length < MAX_QUESTIONS) {
+            console.error("題庫數量不足 10 題。");
+            showFeedback('❌ 遊戲錯誤：題庫數量不足。', 'bg-red-500');
+            return;
+        }
+
+        // 鎖定名稱輸入，準備遊戲
+        nameInput.disabled = true; 
+        currentScore = 0;
+        currentQuestionIndex = 0;
+        questionPool = shuffleArray([...solutions]); // 亂數洗牌並複製題庫
+        
+        updateScoreDisplay();
+        showSection('quiz-section');
+        loadNextQuestion();
+    }
+    
+    /**
+     * 結束遊戲並提交分數。
+     */
+    function endGame() {
+        const playerName = nameInput.value.trim() || '匿名玩家';
+        saveScore(playerName, currentScore); // 提交分數
+        nameInput.disabled = false; // 解鎖名稱輸入
+        showSection('leaderboard-section'); // 跳轉到排行榜
+        // 重設下一題按鈕為預設狀態
+        nextBtn.textContent = '下一題';
+        nextBtn.classList.add('bg-green-500');
+        nextBtn.classList.remove('bg-red-500');
+    }
+
+
+    // --- Initialization ---
+    document.addEventListener('DOMContentLoaded', () => {
+        updateScoreDisplay();
+        
+        // 設定初始歡迎畫面
+        solutionImage.src = "https://placehold.co/160x160/1E3A8A/BFDBFE?text=Chemistry+Quiz";
+        solutionImage.alt = "歡迎參加化學測驗";
+        solutionNameLabel.textContent = "準備好了嗎？";
+        questionCounter.textContent = `第 0 題 / 共 ${MAX_QUESTIONS} 題`;
+
+        // 綁定事件
+        startGameBtn.addEventListener('click', startGame);
+        
+        viewLeaderboardBtn.addEventListener('click', () => {
+            showSection('leaderboard-section');
+        });
+        
+        backToMenuBtn.addEventListener('click', () => {
+            showSection('name-input-section');
+        });
+
+        buttons.forEach(btn => {
+            btn.addEventListener('click', handleAnswer);
+        });
+        
+        // nextBtn 現在調用 loadNextQuestion，該函數內含結束檢查
+        nextBtn.onclick = loadNextQuestion; 
+
+        // 初始狀態: 顯示名稱輸入區
+        showSection('name-input-section');
+        
+        // 啟動 Firebase
+        initializeFirebase();
+    });
+</script>
+
+</body>
+</html>
